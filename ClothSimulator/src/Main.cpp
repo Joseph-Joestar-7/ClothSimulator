@@ -1,139 +1,105 @@
-#include <SFML/Graphics.hpp>
-#include <iostream>
-#include <fstream>
+#include "Particle.hpp"
+#include "Constraint.hpp"
+#include "Input_handler.hpp"
+#include <vector>
 
-int fs, fr, fg, fb;
-sf::Text mainText;
+const int WIDTH=1000;
+const int HEIGHT = 720;
+const float PARTICLE_RADIUS = 10.0f;
+const float GRAVITY = 10.0f;
+const float TIME_STEP = 0.01f;
 
-void write(const std::string& message, float posX, float posY) {
-    mainText.setString(message);
-    // Center the text by offsetting half its width and height
-    sf::FloatRect textRect = mainText.getLocalBounds();
-    mainText.setOrigin(textRect.width / 2, textRect.height / 2);
-    mainText.setPosition(posX, posY);
-}
-
-struct Rect {
-    std::string Name;
-    float iPosX, iPosY;
-    float iSpeedX, iSpeedY;
-    int r, g, b;
-    float w, h;
-} typedef rect;
-
-struct Circ {
-    std::string Name;
-    float iPosX, iPosY;
-    float iSpeedX, iSpeedY;
-    int r, g, b;
-    float radius;
-} typedef circ;
+const int ROW = 10;
+const int COL = 10;
+const float REST_DISTANCE = 30.0f;
 
 int main() {
-    int wWidth = 0;
-    int wHeight = 0;
+	sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "Cloth Simulator");
+	window.setFramerateLimit(60);
 
-    std::string filepath = "config/config.txt";
-    std::ifstream fin(filepath);
-    std::string w;
-    fin >> w;
-    if (w == "Window" || w == "WINDOW") {
-        fin >> wWidth >> wHeight;
-    }
+	std::vector<Particle> particles;
+	std::vector<Constraint> constraints;
 
-    sf::RenderWindow window(sf::VideoMode(wWidth, wHeight), "SFML WORKS!");
+	for (int row = 0; row < ROW; row++) {
+		for (int col = 0; col < COL; col++) {
+			float x = col * REST_DISTANCE + WIDTH / 3;
+			float y = row * REST_DISTANCE + HEIGHT / 3;
+			bool pinned = (row == 0);
+			particles.emplace_back(x, y, pinned);
+		}
+	}
 
-    fin >> w;
-    if (w == "Font") {
-        fin >> w;
-    }
+	// Initialize constraints
+	for (int row = 0; row < ROW; row++) {
+		for (int col = 0; col < COL; col++) {
+			if (col < COL - 1) {
+				// Horizontal constraint
+				constraints.emplace_back(&particles[row * COL + col], &particles[row * COL + col + 1]);
+			}
+			if (row < ROW - 1) {
+				// Vertical constraint
+				constraints.emplace_back(&particles[row * COL + col], &particles[(row + 1) * COL + col]);
+			}
+		}
+	}
 
-    sf::Font myFont;
-    if (!myFont.loadFromFile(w)) {
-        std::cerr << "Couldn't load the font\n";
-        exit(-1);
-    }
+	while (window.isOpen())
+	{
+		sf::Event event;
+		while (window.pollEvent(event)) {
+			if (event.type == sf::Event::Closed) {
+				window.close();
+			}
 
-    fin >> fs >> fr >> fg >> fb;
-    std::vector<std::shared_ptr<rect>> rects;
-    std::vector<std::shared_ptr<circ>> circs;
-    mainText.setFont(myFont);
-    mainText.setFillColor(sf::Color(fr, fg, fb));
-    mainText.setCharacterSize(fs);
+			// handle mouse clicks
+			InputHandler::handle_mouse_click(event, particles, constraints);
 
-    while (fin >> w) {
-        if (w == "Circle") {
-            circ c;
-            fin >> c.Name >> c.iPosX >> c.iPosY >> c.iSpeedX >> c.iSpeedY >> c.r >> c.g >> c.b >> c.radius;
-            circs.push_back(std::make_shared<circ>(c));
-        }
-        else if (w == "Rectangle") {
-            rect r;
-            fin >> r.Name >> r.iPosX >> r.iPosY >> r.iSpeedX >> r.iSpeedY >> r.r >> r.g >> r.b >> r.w >> r.h;
-            rects.push_back(std::make_shared<rect>(r));
-        }
-    }
+		}
 
-    while (window.isOpen()) {
-        sf::Event event;
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) {
-                window.close();
-            }
-        }
+		//apply grav and update particles
+		for (auto& particle : particles)
+		{
+			particle.apply_force(glm::vec2(0, GRAVITY));
+			particle.update(TIME_STEP);
+			particle.constraint_to_bounds(WIDTH, HEIGHT, PARTICLE_RADIUS);
+		}
 
-        window.clear();
+		for (size_t i = 0; i < 5; i++) {
+			for (auto& constraint : constraints) {
+				constraint.satisfy();
+			}
+		}
 
-        // Handle circles
-        for (auto& c : circs) {
-            // Move the circle
-            c->iPosX += c->iSpeedX;
-            c->iPosY += c->iSpeedY;
+		window.clear(sf::Color::Black);
 
-            // Bounce off walls 
-            if (c->iPosX < 0 || c->iPosX + 2 * c->radius > wWidth) {
-                c->iSpeedX = -c->iSpeedX;
-            }
-            if (c->iPosY < 0 || c->iPosY + 2 * c->radius > wHeight) {
-                c->iSpeedY = -c->iSpeedY;
-            }
+		//Draw Particles as balls
+		/*for (const auto& particle : particles)
+		{
+			sf::CircleShape circle(PARTICLE_RADIUS);
+			circle.setFillColor(sf::Color::White);
+			circle.setPosition(sf::Vector2f(particle.position.x,particle.position.y));
+			window.draw(circle);
+		}*/
 
-            // Render circle
-            sf::CircleShape shape(c->radius);
-            shape.setPosition(c->iPosX, c->iPosY);
-            shape.setFillColor(sf::Color(c->r, c->g, c->b));
-            window.draw(shape);
+		// Draw particles as points
+		for (const auto& particle : particles) {
+			sf::Vertex point(sf::Vector2f(particle.position.x,particle.position.y), sf::Color::White);
+			window.draw(&point, 1, sf::Points);
+		}
 
-            // Render circle name centered
-            write(c->Name, c->iPosX + c->radius, c->iPosY + c->radius);
-            window.draw(mainText);
-        }
+		// Draw constraints as lines
+		for (const auto& constraint : constraints) {
+			if (!constraint.active) {
+				continue;
+			}
+			sf::Vertex line[] = {
+				sf::Vertex(sf::Vector2f(constraint.p1->position.x,constraint.p1->position.y), sf::Color::White),
+				sf::Vertex(sf::Vector2f(constraint.p2->position.x,constraint.p2->position.y), sf::Color::White),
+			};
+			window.draw(line, 2, sf::Lines);
+		}
 
-        // Handle rectangles
-        for (auto& r : rects) {
-            // Move the rectangle
-            r->iPosX += r->iSpeedX;
-            r->iPosY += r->iSpeedY;
 
-            // Bounce off walls
-            if (r->iPosX < 0 || r->iPosX + r->w > wWidth) {
-                r->iSpeedX = -r->iSpeedX;
-            }
-            if (r->iPosY < 0 || r->iPosY + r->h > wHeight) {
-                r->iSpeedY = -r->iSpeedY;
-            }
-
-            // Render rectangle
-            sf::RectangleShape shape(sf::Vector2f(r->w, r->h));
-            shape.setPosition(r->iPosX, r->iPosY);
-            shape.setFillColor(sf::Color(r->r, r->g, r->b));
-            window.draw(shape);
-
-            // Render rectangle name centered
-            write(r->Name, r->iPosX + r->w / 2, r->iPosY + r->h / 2);
-            window.draw(mainText);
-        }
-
-        window.display();
-    }
+		window.display();
+	}
 }
